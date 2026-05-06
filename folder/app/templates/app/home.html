@@ -1,0 +1,9 @@
+{% extends 'app/base.html' %}
+
+{% block title %}Home | Django Auth Site{% endblock %}
+
+{% block content %}
+    <h1>Home Dashboard</h1>
+    <p>Welcome, {{ request.user.username }}! You have successfully logged in.</p>
+    <p>This page is accessible only after a successful login.</p>
+{% endblock %}
