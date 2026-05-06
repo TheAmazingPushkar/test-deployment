@@ -3,7 +3,7 @@ import numpy as np
 from tensorflow.keras.preprocessing import image
 
 # Load model once
-model = tf.keras.models.load_model('your_app/ml_model/model.h5')
+model = tf.keras.models.load_model('your_app/ml/model.h5')
 
 def predict_image(img_path):
     img = image.load_img(img_path, target_size=(224, 224))  # match training size
