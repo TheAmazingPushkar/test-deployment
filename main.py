@@ -32,18 +32,24 @@ else:
     model = tf.keras.models.load_model(model_path)
 
 # --- HEATMAP UTILITIES ---
+ def generate_gradcam(img_array, model):
+    """Generates a Grad-CAM heatmap for MobileNetV2 with a Sequential wrapper."""
+     try:
+        # Step 1: Find the actual MobileNetV2 sub-model inside your Sequential model
+        # Typically it's the first layer: model.layers[0]
+        base_model = model.layers[0]
+        
+        # Step 2: Target 'out_relu' inside that base model
+        last_conv_layer = base_model.get_layer("out_relu")
 
-def generate_gradcam(img_array, model, last_conv_layer_name="out_relu"):
-    """Generates a Grad-CAM heatmap for MobileNetV2."""
-    try:
-        # For MobileNetV2, we usually target the 'out_relu' layer
         grad_model = tf.keras.models.Model(
-            [model.inputs], [model.get_layer(last_conv_layer_name).output, model.output]
+            [base_model.inputs], [last_conv_layer.output, base_model.output]
         )
 
         with tf.GradientTape() as tape:
+            # We pass the image through the base_model part
             last_conv_layer_output, preds = grad_model(img_array)
-            # Since binary, we just use the single output value
+            # Binary classification uses the single output channel
             class_channel = preds[:, 0]
 
         grads = tape.gradient(class_channel, last_conv_layer_output)
@@ -53,29 +59,34 @@ def generate_gradcam(img_array, model, last_conv_layer_name="out_relu"):
         heatmap = last_conv_layer_output @ pooled_grads[..., tf.newaxis]
         heatmap = tf.squeeze(heatmap)
 
-        heatmap = tf.maximum(heatmap, 0) / tf.math.reduce_max(heatmap)
+        heatmap = tf.maximum(heatmap, 0) / (tf.math.reduce_max(heatmap) + 1e-10)
         return heatmap.numpy()
     except Exception as e:
         print(f"Grad-CAM generation error: {e}")
         return None
-
 def overlay_heatmap(heatmap, img_original):
-    """Overlays the heatmap onto the original image and returns base64 string."""
+    """Overlays the heatmap onto the image and returns base64."""
     if heatmap is None:
         return ""
-    
-    # Resize heatmap to match image size
-    heatmap = cv2.resize(heatmap, (img_original.shape[1], img_original.shape[0]))
-    heatmap = np.uint8(255 * heatmap)
-    heatmap = cv2.applyColorMap(heatmap, cv2.COLORMAP_JET)
+    try:
+        heatmap = cv2.resize(heatmap, (img_original.shape[1], img_original.shape[0]))
+        heatmap = np.uint8(255 * heatmap)
+        heatmap = cv2.applyColorMap(heatmap, cv2.COLORMAP_JET)
+        superimposed_img = cv2.addWeighted(img_original, 0.6, heatmap, 0.4, 0)
+        _, buffer = cv2.imencode('.jpg', superimposed_img)
+        return base64.b64encode(buffer).decode('utf-8')
+    except Exception as e:
+        print(f"Overlay failed: {e}")
+        return ""
 
-    # Combine images
-    superimposed_img = cv2.addWeighted(img_original, 0.6, heatmap, 0.4, 0)
-    
-    # Convert to Base64
-    _, buffer = cv2.imencode('.jpg', superimposed_img)
-    return base64.b64encode(buffer).decode('utf-8')
+# This ensures the frontend doesn't get a "broken" data URL
+return {
+    "class": predicted_class,
+    "confidence": round(float(confidence), 2),
+    "heatmap": f"data:image/jpeg;base64,{heatmap_base64}" if heatmap_base64 else None
+}
 
+      
 # --- PREDICTION ENDPOINT ---
 
 @app.post("/predict")
@@ -113,6 +124,15 @@ async def predict(file: UploadFile = File(...)):
                 heatmap_base64 = overlay_heatmap(heatmap_raw, np.array(img_resized))
         except Exception as e:
             print(f"Heatmap overlay failed: {e}")
+# Heatmap Generation
+        heatmap_base64 = ""
+        try:
+            heatmap_raw = generate_gradcam(img_array, model)
+            if heatmap_raw is not None:
+                heatmap_base64 = overlay_heatmap(heatmap_raw, np.array(img_resized))
+        except Exception as e:
+            print(f"Heatmap logic failed: {e}")
+        
 
         # 4. Clean up memory
         del img
