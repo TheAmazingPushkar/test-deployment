@@ -1,7 +1,23 @@
-venv/
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+# Environments
+.venv/
 __pycache__/
 *.pyc
-db.sqlite3
+
+# Data & Models
+# If your .h5 file is over 100MB, consider using Git LFS or 
+# just be aware it might make your repo heavy.
+# cattle_model.h5 
+
+# OS specific
+.DS_Store
 .env
-media/
-staticfiles/
