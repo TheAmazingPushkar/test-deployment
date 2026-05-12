@@ -99,10 +99,10 @@ async def predict(file: UploadFile = File(...)):
         
         # Binary Classification Mapping
         if prediction < 0.5:
-            predicted_class = "Buffalo"
+            predicted_class = "It's a Buffalo"
             confidence = (1 - prediction) * 100
         else:
-            predicted_class = "Cattle"
+            predicted_class = "It's a cow"
             confidence = prediction * 100
 
         # 3. Grad-CAM logic
