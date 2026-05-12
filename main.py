@@ -21,36 +21,61 @@ if not os.path.exists(model_path):
 else:
     model = tf.keras.models.load_model(model_path)
 
-def generate_gradcam(img_array, model, last_conv_layer_name="out_relu"):
-    grad_model = models.Model(
-        [model.inputs], [model.get_layer(last_conv_layer_name).output, model.output]
-    )
-    with tf.GradientTape() as tape:
-        last_conv_layer_output, preds = grad_model(img_array)
-        pred_index = tf.argmax(preds[0])
-        class_channel = preds[:, pred_index]
+import gc
 
-    grads = tape.gradient(class_channel, last_conv_layer_output)
-    pooled_grads = tf.reduce_mean(grads, axis=(0, 1, 2))
-    last_conv_layer_output = last_conv_layer_output[0]
-    heatmap = last_conv_layer_output @ pooled_grads[..., tf.newaxis]
-    heatmap = tf.squeeze(heatmap)
-    heatmap = tf.maximum(heatmap, 0) / (tf.math.reduce_max(heatmap) + 1e-10) # Added epsilon to prevent div by zero
-    return heatmap.numpy()
+@app.post("/predict")
+async def predict(file: UploadFile = File(...)):
+    if model is None:
+        return {"error": "Model not loaded on server"}
 
-def overlay_heatmap(heatmap, original_img):
-    heatmap = np.uint8(255 * heatmap)
-    jet = cv2.applyColorMap(heatmap, cv2.COLORMAP_JET)
-    jet = cv2.resize(jet, (original_img.shape[1], original_img.shape[0]))
-    overlayed_img = jet * 0.4 + original_img
-    _, buffer = cv2.imencode('.jpg', overlayed_img)
-    return base64.b64encode(buffer).decode('utf-8')
+    try:
+        # Read and resize BEFORE creating heavy numpy arrays
+        data = await file.read()
+        img = Image.open(io.BytesIO(data)).convert('RGB')
+        img_resized = img.resize((224, 224))
+        
+        # Convert to float32 to save memory over float64
+        img_array = np.array(img_resized).astype('float32') / 255.0
+        img_array = np.expand_dims(img_array, axis=0)
+
+        # 1. Prediction
+        predictions = model.predict(img_array)
+        classes = ['Buffalo', 'Cattle']
+        pred_idx = np.argmax(predictions[0])
+        
+        predicted_class = classes[pred_idx]
+        confidence = float(predictions[0][pred_idx]) * 100
+
+        # 2. Grad-CAM (Wrapped in try/except so it doesn't kill the whole request)
+        heatmap_base64 = ""
+        try:
+            heatmap_raw = generate_gradcam(img_array, model)
+            heatmap_base64 = overlay_heatmap(heatmap_raw, np.array(img_resized))
+        except Exception as grad_err:
+            print(f"Grad-CAM failed: {grad_err}")
+            # We continue even if heatmap fails so you at least get the label
+
+        # 3. Memory Cleanup
+        del img
+        del img_array
+        gc.collect()
+
+        return {
+            "class": predicted_class,
+            "confidence": round(confidence, 2),
+            "heatmap": f"data:image/jpeg;base64,{heatmap_base64}" if heatmap_base64 else None
+        }
+
+    except Exception as e:
+        # This sends the ACTUAL error to your browser console
+        return {"error": str(e), "traceback": "Check Render Logs"}
 
 app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://the-wild-lens.netlify.app"],
+    allow_origins=["*"],
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
