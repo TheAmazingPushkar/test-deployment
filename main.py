@@ -28,18 +28,17 @@ if not os.path.exists(model_path):
     print(f"ERROR: Model file not found at {model_path}")
     model = None
 else:
-    # Load model once at startup
     model = tf.keras.models.load_model(model_path)
 
 # --- HEATMAP UTILITIES ---
- def generate_gradcam(img_array, model):
+
+def generate_gradcam(img_array, model):
     """Generates a Grad-CAM heatmap for MobileNetV2 with a Sequential wrapper."""
-     try:
-        # Step 1: Find the actual MobileNetV2 sub-model inside your Sequential model
-        # Typically it's the first layer: model.layers[0]
+    try:
+        # Reach into the Sequential wrapper to get the MobileNetV2 base
         base_model = model.layers[0]
         
-        # Step 2: Target 'out_relu' inside that base model
+        # Target the last convolutional layer
         last_conv_layer = base_model.get_layer("out_relu")
 
         grad_model = tf.keras.models.Model(
@@ -47,9 +46,7 @@ else:
         )
 
         with tf.GradientTape() as tape:
-            # We pass the image through the base_model part
             last_conv_layer_output, preds = grad_model(img_array)
-            # Binary classification uses the single output channel
             class_channel = preds[:, 0]
 
         grads = tape.gradient(class_channel, last_conv_layer_output)
@@ -64,8 +61,9 @@ else:
     except Exception as e:
         print(f"Grad-CAM generation error: {e}")
         return None
+
 def overlay_heatmap(heatmap, img_original):
-    """Overlays the heatmap onto the image and returns base64."""
+    """Overlays the heatmap onto the image and returns base64 string."""
     if heatmap is None:
         return ""
     try:
@@ -79,14 +77,6 @@ def overlay_heatmap(heatmap, img_original):
         print(f"Overlay failed: {e}")
         return ""
 
-# This ensures the frontend doesn't get a "broken" data URL
-return {
-    "class": predicted_class,
-    "confidence": round(float(confidence), 2),
-    "heatmap": f"data:image/jpeg;base64,{heatmap_base64}" if heatmap_base64 else None
-}
-
-      
 # --- PREDICTION ENDPOINT ---
 
 @app.post("/predict")
@@ -95,20 +85,17 @@ async def predict(file: UploadFile = File(...)):
         return {"error": "Model not loaded on server"}
 
     try:
-        # Read and open image
         data = await file.read()
         img = Image.open(io.BytesIO(data)).convert('RGB')
         
-        # 1. Match your training size: 244x244
+        # Match your training size: 244x244
         img_resized = img.resize((244, 244)) 
         img_array = np.array(img_resized).astype('float32') / 255.0
         img_array = np.expand_dims(img_array, axis=0)
 
-        # 2. Binary Prediction Logic
-        # Binary models output a single sigmoid value [0,1]
+        # Binary Prediction Logic
         prediction = model.predict(img_array)[0][0] 
         
-        # Binary Classification Mapping
         if prediction < 0.5:
             predicted_class = "It's a Buffalo"
             confidence = (1 - prediction) * 100
@@ -116,15 +103,7 @@ async def predict(file: UploadFile = File(...)):
             predicted_class = "It's a cow"
             confidence = prediction * 100
 
-        # 3. Grad-CAM logic
-        heatmap_base64 = ""
-        try:
-            heatmap_raw = generate_gradcam(img_array, model)
-            if heatmap_raw is not None:
-                heatmap_base64 = overlay_heatmap(heatmap_raw, np.array(img_resized))
-        except Exception as e:
-            print(f"Heatmap overlay failed: {e}")
-# Heatmap Generation
+        # Grad-CAM logic
         heatmap_base64 = ""
         try:
             heatmap_raw = generate_gradcam(img_array, model)
@@ -132,9 +111,8 @@ async def predict(file: UploadFile = File(...)):
                 heatmap_base64 = overlay_heatmap(heatmap_raw, np.array(img_resized))
         except Exception as e:
             print(f"Heatmap logic failed: {e}")
-        
 
-        # 4. Clean up memory
+        # Clean up memory
         del img
         del img_array
         gc.collect()
