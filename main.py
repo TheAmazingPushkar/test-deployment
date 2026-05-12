@@ -62,8 +62,8 @@ app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["https://the-wild-lens.netlify.app/"],
-    allow_methods=["https://the-wild-lens.netlify.app/"],
-    allow_headers=["https://the-wild-lens.netlify.app/"],
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # Load model (make sure cattle_model.h5 is in the same folder)
