@@ -87,9 +87,14 @@ async def predict(file: UploadFile = File(...)):
     predicted_class = classes[np.argmax(predictions)]
     confidence = float(np.max(predictions)) * 100
 
+    # --- ADD THESE TWO LINES TO ACTUALLY GENERATE THE HEATMAP ---
+    heatmap_raw = generate_gradcam(img_array, model)
+    heatmap_base64 = overlay_heatmap(heatmap_raw, np.array(img))
+    # ------------------------------------------------------------
+
     return {
         "class": predicted_class,
-        "confidence": round(confidence, 2)
+        "confidence": round(confidence, 2),
         "heatmap": f"data:image/jpeg;base64,{heatmap_base64}"
     }
 
